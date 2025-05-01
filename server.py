@@ -42,48 +42,41 @@ async def get_resource_list() -> EventSourceResponse:
     return EventSourceResponse(event_generator)
 
 @mcp.tool()
-async def orchestrate_analysis(text: str) -> Dict[str, Any]:
-    """Orchestrate a multi-step analysis process"""
+async def orchestrate_chain(chain_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a configured chain of tools
+    
+    Expected config format:
+    {
+        "initial_context": {
+            "query": "user query here",
+            "other_params": "other values"
+        },
+        "steps": [
+            {
+                "name": "initial_analysis",
+                "tools": ["vibe_check", "sequentialthinking_tools"],
+                "depends_on": None
+            },
+            {
+                "name": "library_check",
+                "tools": ["resolve-library-id", "get-library-docs"],
+                "depends_on": ["initial_analysis"]
+            }
+        ]
+    }
+    """
     orchestrator = ProcessOrchestrator(mcp)
     
-    # Configure step 1
-    orchestrator.add_step(
-        name="initial_analysis",
-        tools=[
-            {
-                "name": "vibe_check",
-                "input_processor": "prepare_vibe_input",
-                "output_processor": "process_vibe_result"
-            },
-            {
-                "name": "resolve-library-id",
-                "input_processor": "prepare_library_input"
-            },
-            {
-                "name": "sequentialthinking_tools"
-            }
-        ],
-        initial_context={"input_text": text}
-    )
+    # Configure steps from chain config
+    for step in chain_config["steps"]:
+        orchestrator.add_step(
+            name=step["name"],
+            tools=step["tools"],
+            depends_on=step["depends_on"],
+            initial_context=chain_config.get("initial_context", {})
+        )
 
-    # Configure step 2
-    orchestrator.add_step(
-        name="deep_analysis",
-        tools=[
-            {
-                "name": "vibe_learn",
-                "input_processor": "prepare_vibe_learn_input"
-            },
-            {
-                "name": "get-library-docs"
-            },
-            {
-                "name": "sequentialthinking_tools"
-            }
-        ],
-        depends_on=["initial_analysis"]
-    )
-
-    # Execute the process
+    # Execute the configured chain
     results = await orchestrator.execute()
     return results
