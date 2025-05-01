@@ -1,0 +1,26 @@
+Tool Name
+list_workflows
+get_workflow
+create_workflow
+update_workflow
+delete_workflow
+activate_workflow
+deactivate_workflow
+list_executions
+get_execution
+delete_execution
+install_repo_mcp_server
+install_local_mcp_server
+memory.create
+memory.search
+memory.list
+sequentialthinking_tools
+vibe_check
+vibe_distill
+vibe_learn
+fetch_html
+fetch_markdown
+fetch_txt
+fetch_json
+resolve-library-id
+get-library-docs
