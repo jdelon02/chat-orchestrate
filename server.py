@@ -1,4 +1,5 @@
 # server.py
+import asyncio
 import httpx
 from fastmcp import Context, FastMCP, Client
 from sse_starlette.sse import EventSourceResponse
@@ -20,63 +21,50 @@ sse_manager = SSEClientManager(
 
 processor = ProcessorClass()
 
+async def get_sse_manager() -> SSEClientManager:
+    """Get or create SSE manager instance"""
+    return sse_manager
+
 
 @mcp.tool()
-async def get_tool_list() -> str:
-    """Connect to SSE server and return results"""
-    tools = await sse_manager.get_tools()
+async def get_tool_list() -> Dict[str, Any]:
+    """Get available tools using FastMCP's built-in list_tools method"""
     try:
-        # Process the tools data
-        await processor.process_tools(tools)
+        async with await get_sse_manager() as manager:
+            return await manager._client.list_tools()
     except Exception as e:
-        print(f"Error processing tools data: {str(e)}")
-        raise
-    return tools
+        if "timeout" in str(e).lower():
+            return {
+                "status": "error",
+                "error": "Request timed out. Please try again."
+            }
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+    
    
 @mcp.resource("resources://list")
 async def get_resource_list() -> EventSourceResponse:
     """Get a list of resources from the SSE server and return as streaming events"""
-    # Get the generator without calling it
-    event_generator = sse_manager.get_resources()
-    # Pass the generator directly to EventSourceResponse
-    return EventSourceResponse(event_generator)
+    async with await get_sse_manager() as manager:
+        event_generator = manager.get_resources()
+        return EventSourceResponse(event_generator)
 
 @mcp.tool()
 async def orchestrate_chain(chain_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Execute a configured chain of tools
-    
-    Expected config format:
-    {
-        "initial_context": {
-            "query": "user query here",
-            "other_params": "other values"
-        },
-        "steps": [
-            {
-                "name": "initial_analysis",
-                "tools": ["vibe_check", "sequentialthinking_tools"],
-                "depends_on": None
-            },
-            {
-                "name": "library_check",
-                "tools": ["resolve-library-id", "get-library-docs"],
-                "depends_on": ["initial_analysis"]
-            }
-        ]
-    }
     """
-    orchestrator = ProcessOrchestrator(mcp)
-    
-    # Configure steps from chain config
-    for step in chain_config["steps"]:
-        orchestrator.add_step(
-            name=step["name"],
-            tools=step["tools"],
-            depends_on=step["depends_on"],
-            initial_context=chain_config.get("initial_context", {})
-        )
+    async with await get_sse_manager() as manager:
+        orchestrator = ProcessOrchestrator(mcp)
+        
+        for step in chain_config["steps"]:
+            orchestrator.add_step(
+                name=step["name"],
+                tools=step["tools"],
+                depends_on=step["depends_on"],
+                initial_context=chain_config.get("initial_context", {})
+            )
 
-    # Execute the configured chain
-    results = await orchestrator.execute()
-    return results
+        return await orchestrator.execute()

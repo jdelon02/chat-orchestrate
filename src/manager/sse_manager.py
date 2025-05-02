@@ -1,7 +1,8 @@
 import base64
-from fastmcp import Client, Context
+import asyncio
+from fastmcp import Client
 from fastmcp.client.transports import SSETransport
-from typing import Optional, AsyncGenerator, Dict, Any
+from typing import AsyncGenerator, Dict, Any
 from datetime import datetime
 
 
@@ -11,8 +12,33 @@ class SSEClientManager:
         self.username = username
         self.password = password
         self.headers = self._create_headers()
-        self.session_context: Dict[str, Any] = {}
-        self.session_start = datetime.now()
+        self._client = None
+        self._transport = None
+
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.disconnect()
+
+    async def connect(self):
+        """Establish connection with SSE server"""
+        if not self._transport:
+            self._transport = SSETransport(
+                self.base_url,
+                headers=self.headers
+            )
+        if not self._client:
+            self._client = Client(self._transport)
+            await self._client.__aenter__()
+
+    async def disconnect(self):
+        """Close connection with SSE server"""
+        if self._client:
+            await self._client.__aexit__(None, None, None)
+            self._client = None
+            self._transport = None
 
     def _create_headers(self) -> dict:
         """Create headers with Basic Auth and SSE requirements"""
@@ -22,53 +48,24 @@ class SSEClientManager:
 
         return {
             "Authorization": f"Basic {credentials}",
-            "Content-Type": "application/json",
             "Accept": "text/event-stream",
             "Cache-Control": "no-cache",
             "Connection": "keep-alive"
         }
 
+    async def get_tools(self) -> Dict[str, Any]:
+        """Get tools from SSE server"""
+        await self.connect()
+        return await self._client.list_tools()
+
     async def get_resources(self) -> AsyncGenerator[dict, None]:
-        """Get resources from SSE server"""
-        transport = SSETransport(self.base_url, headers=self.headers)
-        async with Client(transport) as client:
-            resources = await client.list_resources()
-            for resource in resources:
-                if isinstance(resource, dict):
-                    resource_id = resource.get('id', '')
-                    yield {
-                        'event': 'resource',
-                        'data': {
-                            'name': resource.get('name', ''),
-                            'description': resource.get('description', ''),
-                            'type': resource.get('type', ''),
-                            'status': resource.get('status', '')
-                        },
-                        'id': resource_id,
-                        'retry': 1000
-                    }
-
-    async def update_context(self, key: str, value: Any) -> None:
-        """Update the session context with new information"""
-        self.session_context[key] = {
-            'value': value,
-            'timestamp': datetime.now().isoformat()
-        }
-
-    async def get_context(self, key: str) -> Optional[Any]:
-        """Retrieve value from session context"""
-        if key in self.session_context:
-            return self.session_context[key]['value']
-        return None
-
-    async def get_tools(self) -> dict:
-        """Get tools from SSE server with context"""
-        transport = SSETransport(self.base_url, headers=self.headers)
-        async with Client(transport) as client:
-            # Create a context object for this request
-            context = Context()
-            context.set("session_start", self.session_start.isoformat())
-            context.set("session_context", self.session_context)
-            
-            # Pass context to the client call
-            return await client.list_tools(context=context)
+        """Get resources from SSE server using FastMCP's list_resources method"""
+        await self.connect()
+        resources = await self._client.list_resources()
+        for resource in resources:
+            if isinstance(resource, dict):
+                yield {
+                    'event': 'resource',
+                    'data': resource,
+                    'retry': 1000
+                }
