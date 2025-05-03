@@ -10,6 +10,15 @@ from src.orchestrator.orchestrator import ProcessOrchestrator  # Fixed import pa
 from src.clients.vibe_check import VibeCheckClient
 from src.clients.context7 import Context7Client
 from src.clients.sequential_thinking import SequentialThinkingClient
+import logging
+import json
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Create an MCP server
 mcp = FastMCP("Demo")
@@ -94,17 +103,57 @@ async def run_vibe_check(data: Dict[str, str]) -> Dict[str, Any]:
         return {"sentiment": response}
 
 @mcp.tool()
-async def run_context7_lookup(data: Dict[str, str]) -> Dict[str, Any]:
+async def run_context7(data: Dict[str, str]) -> Dict[str, Any]:
+    logger.info("Starting run_context7 with input: %s", data)
     async with await get_sse_manager() as manager:
         text = data["text"]
-        response = await manager.execute_tool(
-            "resolve-library-id",
-            {   
-                "libraryName": text  # Changed from "text" to "userRequest"
-            }
-        )
-        return {"context7CompatibleLibraryID": response}
-    
+        logger.debug("Resolving library ID for text: %s", text)
+        
+        try:
+            # First get library ID
+            response = await manager.execute_tool(
+                "resolve-library-id",
+                {   
+                    "libraryName": text
+                }
+            )
+            
+            # Extract text from TextContent object
+            if isinstance(response, list) and len(response) > 0:
+                library_text = response[0].text if hasattr(response[0], 'text') else str(response[0])
+                
+                # Try to find the library ID in the text
+                if "Context7-compatible library ID:" in library_text:
+                    library_id = library_text.split("Context7-compatible library ID:")[1].split("\n")[0].strip()
+                    logger.info("Found library ID: %s", library_id)
+                    
+                    # Get library docs and extract text content
+                    library_docs = await manager.execute_tool(
+                        "get-library-docs",
+                        {
+                            "context7CompatibleLibraryID": library_id
+                        }
+                    )
+                    
+                    # Convert TextContent objects to plain text
+                    if isinstance(library_docs, list):
+                        result = {
+                            "content": [
+                                doc.text if hasattr(doc, 'text') else str(doc)
+                                for doc in library_docs
+                            ],
+                            "isError": False
+                        }
+                        logger.info("Successfully retrieved library docs")
+                        return result
+                    
+            logger.warning("No valid library ID found in response")
+            return {"error": "No valid library ID found in response"}
+            
+        except Exception as e:
+            logger.error("Error executing resolve-library-id: %s", str(e))
+            return {"error": f"Failed to resolve library ID: {str(e)}"}
+
 @mcp.tool()
 async def run_context7_search(query: str) -> Dict[str, Any]:
     """Run a Context7 search process"""
