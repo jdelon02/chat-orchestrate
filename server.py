@@ -154,11 +154,6 @@ async def run_context7(data: Dict[str, str]) -> Dict[str, Any]:
             logger.error("Error executing resolve-library-id: %s", str(e))
             return {"error": f"Failed to resolve library ID: {str(e)}"}
 
-@mcp.tool()
-async def run_context7_search(query: str) -> Dict[str, Any]:
-    """Run a Context7 search process"""
-    client = Context7Client(mcp)
-    return await client.execute(query)
 
 @mcp.tool()
 async def run_sequential_thinking(query: str) -> Dict[str, Any]:
@@ -166,11 +161,53 @@ async def run_sequential_thinking(query: str) -> Dict[str, Any]:
     client = SequentialThinkingClient(mcp)
     return await client.execute(query)
 
-async def _analyze_sentiment(text: str) -> str:
-    """Internal function to analyze sentiment"""
+@mcp.tool()
+async def orchestrate(data: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Orchestrate multiple tools in sequence, passing results through the chain.
+    Expects input with 'text' key containing the initial query.
+    """
+    logger.info("Starting orchestration with input: %s", data)
     async with await get_sse_manager() as manager:
-        response = await manager._client.chat([
-            {"role": "system", "content": "You are a sentiment analysis expert."},
-            {"role": "user", "content": f"Analyze the sentiment of this text: {text}"}
-        ])
-        return response
+        try:
+            initial_text = data["text"]
+            result = {}
+            
+            # Step 1: Get documentation using run_context7
+            logger.info("Step 1: Getting documentation")
+            docs_result = await run_context7({initial_text})
+            
+            if docs_result.get("isError"):
+                logger.error("Documentation lookup failed: %s", docs_result.get("error"))
+                return docs_result
+                
+            result.update(docs_result)
+            
+            # Step 2: Run sentiment analysis on the documentation
+            if docs_result.get("content"):
+                logger.info("Step 2: Running sentiment analysis")
+                content_text = " ".join(docs_result["content"])
+                sentiment_result = await run_vibe_check({
+                    "text": content_text
+                })
+                
+                # Add sentiment to result
+                result["sentiment"] = sentiment_result.get("sentiment")
+            
+            logger.info("Orchestration completed successfully")
+            
+            # Return simplified result structure
+            return {
+                "documentation": docs_result.get("content", []),
+                "sentiment": result.get("sentiment"),
+                "isError": False
+            }
+            
+        except Exception as e:
+            logger.error("Error in orchestration: %s", str(e))
+            return {
+                "error": str(e),
+                "isError": True
+            }
+
+

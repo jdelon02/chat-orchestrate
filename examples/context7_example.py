@@ -1,18 +1,42 @@
+import asyncio
+import logging
 from fastmcp import FastMCP
-from src.clients.context7 import Context7Client, run_context7_search
+from src.orchestrator.orchestrator import ProcessOrchestrator
 
-async def main(query: str = "express middleware"):
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+async def main():
+    """Example showing how to use the Context7Client with ProcessOrchestrator"""
+    # Initialize FastMCP client with name
     mcp = FastMCP("Context7Example")
     
-    # Method 1: Using the client class
-    client = Context7Client(mcp)
-    result1 = await client.execute(query)
-    print("Using client class:", result1)
+    # Create orchestrator instance with mcp client
+    orchestrator = ProcessOrchestrator(mcp)
     
-    # Method 2: Using the convenience function
-    result2 = await run_context7_search(query, mcp)
-    print("Using convenience function:", result2)
+    # Initialize with query
+    query = "How do I use Python's asyncio library?"
+    
+    # Set specialized client with mcp instance
+    orchestrator.set_specialized_client('context7', mcp=mcp, query=query)
+    
+    try:
+        # Execute the orchestration
+        result = await orchestrator.execute()
+        
+        if not result.get("isError", True):
+            # Process successful result
+            logger.info("Successfully retrieved documentation:")
+            for content in result.get("content", []):
+                logger.info("---")
+                logger.info(content)
+        else:
+            # Handle error case
+            logger.error(f"Error retrieving documentation: {result.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        logger.error(f"Orchestration failed: {str(e)}")
 
 if __name__ == "__main__":
-    import asyncio
+    # Run the example
     asyncio.run(main())

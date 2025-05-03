@@ -3,6 +3,16 @@ from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 import csv
+import logging
+
+# Set up logging configuration
+log_file = Path(__file__).parent.parent.parent / 'mcp_tool_execution.log'
+logging.basicConfig(
+    filename=str(log_file),
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('ProcessOrchestrator')
 
 class StepStatus(Enum):
     PENDING = "pending"
@@ -21,161 +31,52 @@ class Step:
 
 class ProcessOrchestrator:
     def __init__(self, mcp_client):
-        self.steps: Dict[str, Step] = {}
-        self.available_tools: List[str] = self._load_available_tools()
-        self.mcp_client = mcp_client
-        self.global_context: Dict[str, Any] = {}
-        self.processors: Dict[str, Dict[str, Callable]] = {}
-        self.specialized_client = None
+        """Initialize ProcessOrchestrator with FastMCP client"""
+        self.mcp = mcp_client
+        logger.info("ProcessOrchestrator initialized")
+        # Log available methods on MCP client
+        logger.info("MCP Client Methods:")
+        for method_name in dir(self.mcp):
+            if not method_name.startswith('_'):
+                method = getattr(self.mcp, method_name)
+                logger.info(f"- {method_name}: {method}")
 
-    def set_specialized_client(self, client_type: str, **kwargs) -> None:
-        """Set a specialized client (VibeCheck, Context7, etc)"""
-        from ..clients.client_factory import ClientFactory
-        self.specialized_client = ClientFactory.create_client(client_type, **kwargs)
-        if self.specialized_client:
-            # Add predefined steps from the specialized client
-            steps = ClientFactory.get_client_steps(self.specialized_client)
-            for name, config in steps.items():
-                self.add_step(
-                    name=name,
-                    tools=[config['tool']],
-                    depends_on=config.get('depends_on', [])
-                )
-
-    def _load_available_tools(self) -> List[str]:
-        """Load available tools from the tools file"""
-        tools_file = Path(__file__).parent.parent.parent / 'assets' / 'available.tools'
-        tools = []
-        
-        with open(tools_file, 'r') as csvfile:
-            reader = csv.reader(csvfile)
-            next(reader)  # Skip header
-            tools = [row[0] for row in reader]
-        
-        return tools
-
-    def register_processor(self, tool_name: str, input_proc: Optional[Callable] = None, 
-                         output_proc: Optional[Callable] = None) -> None:
-        """Register input/output processors for a specific tool"""
-        if tool_name not in self.available_tools:
-            raise ValueError(f"Cannot register processors for unavailable tool: {tool_name}")
-        
-        self.processors[tool_name] = {
-            "input": input_proc,
-            "output": output_proc
-        }
-
-    def add_step(self, 
-                 name: str, 
-                 tools: List[str],  # Simplified to just tool names
-                 depends_on: Optional[List[str]] = None,
-                 initial_context: Dict[str, Any] = None) -> None:
-        """Add a new step with multiple tools"""
-        valid_tools = [tool for tool in tools if tool in self.available_tools]
-        
-        if not valid_tools:
-            print(f"Warning: No valid tools found for step '{name}' - step will be skipped")
-            return
-
-        self.steps[name] = Step(
-            name=name,
-            tools=valid_tools,
-            depends_on=depends_on,
-            context=initial_context or {}
-        )
-
-    async def process_tool(self, tool_name: str, data: Any) -> Any:
-        """Process tool execution with registered processors"""
-        processors = self.processors.get(tool_name, {})
-        
-        # Apply input processor if registered
-        if processors.get("input"):
-            data = processors["input"](data)
-            
-        # Execute tool
-        result = await self.mcp_client.execute_tool(tool_name, data)
-        
-        # Apply output processor if registered
-        if processors.get("output"):
-            result = processors["output"](result)
-            
-        return result
-
-    async def execute_step(self, step: Step) -> Dict[str, Any]:
-        """Execute a step's tools with processing"""
-        step.status = StepStatus.RUNNING
-        results = {}
-        
+    async def execute_chain(self, initial_input: str) -> Dict[str, Any]:
+        """Execute a chain of tools, passing results through the sequence."""
         try:
-            for tool_name in step.tools:
-                # Use specialized client's input processing if available
-                input_data = (
-                    self.specialized_client.get_step_input(step.name)
-                    if self.specialized_client
-                    else step.context
-                )
-                
-                result = await self.process_tool(tool_name, input_data)
-                results[tool_name] = result
-                
-                # Update specialized client context if available
-                if self.specialized_client:
-                    self.specialized_client.update_context(step.name, result)
-                
-                # Update step context
-                step.context[f"{tool_name}_result"] = result
+            # First tool: run_context7 to get documentation
+            logger.info(f"Starting documentation lookup for: {initial_input}")
+            docs_result = await self.mcp.tool("run_context7")({
+                "text": initial_input
+            })
+            logger.info("Documentation lookup completed")
+            logger.debug(f"Documentation result: {docs_result}")
+
+            # Check if we got valid documentation content
+            if not docs_result.get("content"):
+                logger.warning("No documentation content found")
+                return docs_result
+
+            # Second tool: vibe_check on the documentation content
+            content_text = " ".join(docs_result["content"])
+            logger.info("Starting sentiment analysis on documentation")
+            logger.debug(f"Sentiment analysis input: {content_text[:100]}...")  # First 100 chars
             
-            step.result = results
-            step.status = StepStatus.COMPLETED
-            return results
+            sentiment_result = await self.mcp.tool("vibe_check")({
+                "userRequest": content_text
+            })
+            logger.info("Sentiment analysis completed")
+            logger.debug(f"Sentiment result: {sentiment_result}")
+
+            # Add sentiment analysis to the result
+            docs_result["sentiment"] = sentiment_result
+            logger.info("Chain execution completed successfully")
             
+            return docs_result
+
         except Exception as e:
-            step.status = StepStatus.FAILED
-            raise RuntimeError(f"Step {step.name} failed: {str(e)}")
-
-    async def execute(self) -> Dict[str, Any]:
-        """Execute all valid steps in the orchestration process"""
-        results = {}
-        completed_steps = set()
-
-        while len(completed_steps) < len(self.steps):
-            for step_name, step in self.steps.items():
-                if step_name in completed_steps:
-                    continue
-
-                # Skip if dependencies aren't met
-                if step.depends_on and not all(dep in completed_steps for dep in step.depends_on):
-                    continue
-
-                # Skip empty steps
-                if not step.tools:
-                    print(f"Skipping empty step '{step_name}'")
-                    completed_steps.add(step_name)
-                    continue
-
-                # Check if step should be skipped based on specialized client
-                if self.specialized_client and hasattr(self.specialized_client.steps.get(step_name, {}), 'should_skip'):
-                    should_skip = self.specialized_client.steps[step_name]['should_skip'](self.specialized_client)
-                    if should_skip:
-                        print(f"Skipping step '{step_name}' based on client conditions")
-                        completed_steps.add(step_name)
-                        continue
-
-                try:
-                    results[step_name] = await self.execute_step(step)
-                    completed_steps.add(step_name)
-                except Exception as e:
-                    print(f"Error executing step '{step_name}': {str(e)}")
-                    step.status = StepStatus.FAILED
-                    raise
-
-        return results
-
-    def get_final_result(self) -> Dict[str, Any]:
-        """Get final result, using specialized client if available"""
-        if self.specialized_client:
-            return self.specialized_client.get_final_result()
-        return {
-            "steps": self.steps,
-            "context": self.global_context
-        }
+            logger.error(f"Error in execute_chain: {str(e)}", exc_info=True)
+            return {
+                "error": str(e),
+                "isError": True
+            }
