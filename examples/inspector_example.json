@@ -1,0 +1,18 @@
+{
+    "tool": "sequential-thinking",
+    "input": {
+        "goal": "Get and process resources",
+        "thoughts": [
+            {
+                "tool": "get_resource_list",
+                "input": {}
+            },
+            {
+                "tool": "process_resources",
+                "input": {
+                    "resources": "${previous.response}"
+                }
+            }
+        ]
+    }
+}

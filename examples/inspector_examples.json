@@ -1,0 +1,44 @@
+{
+    "vibe_check": {
+        "text": "I love working with this amazing framework!"
+    },
+    "context7_example": {
+        "tool": "context7",
+        "input": {
+            "query": "express middleware"
+        }
+    },
+    "sequential_thinking_example": {
+        "tool": "sequential_thinking",
+        "input": {
+            "problem": "How to implement a caching system for a web application",
+            "steps": ["Identify requirements", "Choose cache storage", "Implement cache logic", "Add error handling"]
+        }
+    },
+    "orchestrate_chain_example": {
+        "tool": "orchestrate_chain",
+        "input": {
+            "steps": [
+                {
+                    "name": "vibe_analysis",
+                    "tools": ["vibe_check", "vibe_learn", "vibe_distill"],
+                    "depends_on": []
+                },
+                {
+                    "name": "library_search",
+                    "tools": ["resolve-library-id", "get-library-docs"],
+                    "depends_on": ["vibe_analysis"]
+                },
+                {
+                    "name": "final_analysis",
+                    "tools": ["sequentialthinking_tools"],
+                    "depends_on": ["library_search"]
+                }
+            ],
+            "initial_context": {
+                "text": "Analyze the performance of this library",
+                "library_query": "express middleware"
+            }
+        }
+    }
+}

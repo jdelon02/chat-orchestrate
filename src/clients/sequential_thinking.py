@@ -1,46 +1,26 @@
-from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
-
-@dataclass
-class SequentialContext:
-    """Context object for sequential thinking process"""
-    initial_query: str
-    thought_steps: List[str] = None
-    final_analysis: Optional[Dict] = None
+from fastmcp import FastMCP
+from typing import List
 
 class SequentialThinkingClient:
-    def __init__(self, query: str):
-        self.context = SequentialContext(
-            initial_query=query,
-            thought_steps=[]
+    def __init__(self, mcp: FastMCP):
+        self.mcp = mcp
+        self.client_name = "sequential_thinking"
+
+    async def execute(self, problem: str, steps: List[str]) -> dict:
+        """Execute sequential problem solving analysis"""
+        steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+        result = await self.mcp.execute_tool(
+            "chat",
+            {
+                "messages": [
+                    {"role": "system", "content": "You are an expert at breaking down and solving problems step by step."},
+                    {"role": "user", "content": f"Problem: {problem}\n\nAnalyze this problem following these steps:\n{steps_str}"}
+                ]
+            }
         )
-        self.steps = {
-            "analyze": {
-                "tool": "sequentialthinking_tools",
-                "depends_on": None
-            }
-        }
+        return {"analysis": result}
 
-    def get_step_input(self, step_name: str) -> Dict[str, Any]:
-        """Prepare input for sequential thinking tool"""
-        if step_name == "analyze":
-            return {
-                "query": self.context.initial_query,
-                "previous_steps": self.context.thought_steps
-            }
-        raise ValueError(f"Unknown step: {step_name}")
-
-    def update_context(self, step_name: str, result: Any) -> None:
-        """Update context with step results"""
-        if step_name == "analyze":
-            if isinstance(result, dict):
-                self.context.thought_steps = result.get('steps', [])
-                self.context.final_analysis = result.get('analysis')
-
-    def get_final_result(self) -> Dict[str, Any]:
-        """Return the final processed result"""
-        return {
-            "query": self.context.initial_query,
-            "thought_steps": self.context.thought_steps,
-            "analysis": self.context.final_analysis
-        }
+async def run_sequential_thinking(problem: str, steps: List[str], mcp: FastMCP) -> dict:
+    """Convenience function to run sequential thinking without instantiating the class"""
+    client = SequentialThinkingClient(mcp)
+    return await client.execute(problem, steps)

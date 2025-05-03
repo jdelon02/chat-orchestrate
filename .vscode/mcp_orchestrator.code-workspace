@@ -1,0 +1,33 @@
+{
+    "folders": [
+        {
+            "path": "..",
+            "name": "MCP Orchestrator"
+        }
+    ],
+    "settings": {
+        "context7.libraries": [
+            "fastmcp",
+            "python-standard-library",
+            "asyncio"
+        ],
+        "context7.projectRoot": "${workspaceFolder}",
+        "github.copilot.enable": {
+            "*": true,
+            "plaintext": false,
+            "markdown": true,
+            "python": true
+        },
+        "github.copilot.advanced": {
+            "inlineSuggestCount": 3,
+            "projectInstructions": "${workspaceFolder}/.github/copilot-instructions.md"
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "github.copilot",
+            "github.copilot-chat",
+            "ms-python.python"
+        ]
+    }
+}

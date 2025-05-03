@@ -9,6 +9,14 @@ class ProcessorClass:
         self.assets_dir.mkdir(exist_ok=True)
         self.tools_file = self.assets_dir / 'available.tools'
         self._progress_token = 0
+        self.default_tools = [
+            "vibe_check",
+            "vibe_learn",
+            "vibe_distill",
+            "resolve-library-id",
+            "get-library-docs",
+            "sequentialthinking_tools"
+        ]
 
     async def process_tools(self, tools_data: Union[str, dict, list], client=None) -> None:
         """Process tools data from FastMCP and save tool names to CSV"""
@@ -23,31 +31,39 @@ class ProcessorClass:
             elif isinstance(data, dict) and "content" in data:
                 data = data["content"]
             
-            total_items = len(data) if isinstance(data, list) else 1
+            # Add default tools to the data
+            if isinstance(data, list):
+                data.extend(self.default_tools)
+            else:
+                data = self.default_tools
+
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_data = []
+            for item in data:
+                name = item.get("name", item) if isinstance(item, dict) else item
+                if name not in seen:
+                    seen.add(name)
+                    unique_data.append(item)
+            data = unique_data
+            
+            total_items = len(data)
             processed = 0
 
             with open(self.tools_file, 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(['Tool Name'])
                 
-                if isinstance(data, list):
-                    for tool in data:
-                        name = ""
-                        if isinstance(tool, dict):
-                            name = tool.get("name", "")
-                        elif isinstance(tool, str):
-                            name = tool
-                        writer.writerow([name])
-                        processed += 1
-                        if client:
-                            await client.progress(self._progress_token, processed, total_items)
-                else:
-                    if isinstance(data, dict):
-                        writer.writerow([data.get("name", "")])
-                    else:
-                        writer.writerow([str(data)])
+                for tool in data:
+                    name = ""
+                    if isinstance(tool, dict):
+                        name = tool.get("name", "")
+                    elif isinstance(tool, str):
+                        name = tool
+                    writer.writerow([name])
+                    processed += 1
                     if client:
-                        await client.progress(self._progress_token, 1, 1)
+                        await client.progress(self._progress_token, processed, total_items)
 
             if client:
                 await client.progress(self._progress_token, total_items, total_items)

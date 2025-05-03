@@ -26,6 +26,21 @@ class ProcessOrchestrator:
         self.mcp_client = mcp_client
         self.global_context: Dict[str, Any] = {}
         self.processors: Dict[str, Dict[str, Callable]] = {}
+        self.specialized_client = None
+
+    def set_specialized_client(self, client_type: str, **kwargs) -> None:
+        """Set a specialized client (VibeCheck, Context7, etc)"""
+        from ..clients.client_factory import ClientFactory
+        self.specialized_client = ClientFactory.create_client(client_type, **kwargs)
+        if self.specialized_client:
+            # Add predefined steps from the specialized client
+            steps = ClientFactory.get_client_steps(self.specialized_client)
+            for name, config in steps.items():
+                self.add_step(
+                    name=name,
+                    tools=[config['tool']],
+                    depends_on=config.get('depends_on', [])
+                )
 
     def _load_available_tools(self) -> List[str]:
         """Load available tools from the tools file"""
@@ -93,9 +108,21 @@ class ProcessOrchestrator:
         
         try:
             for tool_name in step.tools:
-                result = await self.process_tool(tool_name, step.context)
+                # Use specialized client's input processing if available
+                input_data = (
+                    self.specialized_client.get_step_input(step.name)
+                    if self.specialized_client
+                    else step.context
+                )
+                
+                result = await self.process_tool(tool_name, input_data)
                 results[tool_name] = result
-                # Update step context with tool result
+                
+                # Update specialized client context if available
+                if self.specialized_client:
+                    self.specialized_client.update_context(step.name, result)
+                
+                # Update step context
                 step.context[f"{tool_name}_result"] = result
             
             step.result = results
@@ -126,6 +153,14 @@ class ProcessOrchestrator:
                     completed_steps.add(step_name)
                     continue
 
+                # Check if step should be skipped based on specialized client
+                if self.specialized_client and hasattr(self.specialized_client.steps.get(step_name, {}), 'should_skip'):
+                    should_skip = self.specialized_client.steps[step_name]['should_skip'](self.specialized_client)
+                    if should_skip:
+                        print(f"Skipping step '{step_name}' based on client conditions")
+                        completed_steps.add(step_name)
+                        continue
+
                 try:
                     results[step_name] = await self.execute_step(step)
                     completed_steps.add(step_name)
@@ -135,3 +170,12 @@ class ProcessOrchestrator:
                     raise
 
         return results
+
+    def get_final_result(self) -> Dict[str, Any]:
+        """Get final result, using specialized client if available"""
+        if self.specialized_client:
+            return self.specialized_client.get_final_result()
+        return {
+            "steps": self.steps,
+            "context": self.global_context
+        }
